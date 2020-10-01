@@ -86,6 +86,55 @@ static void MX_TIM4_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void processTMGWMessage(UART_HandleTypeDef* huart, uint8_t* ptr, int len)
+{
+    printf("asdf\r\n");
+}
+
+//void HAL_UART_RxIdleCallback(UART_HandleTypeDef* huart)
+//{
+//    uint16_t rxXferCount = 0;
+
+//    //
+//    if( (huart->hdmarx != NULL) && (huart->Instance == USART1) )
+//    {
+//        __HAL_UART_CLEAR_IDLEFLAG(huart);
+//        __HAL_UART_ENABLE_IT(huart, UART_IT_TXE);
+
+////        HAL_UART_DMAStop(huart);
+//        HAL_UART_Abort(huart);
+
+//        DMA_HandleTypeDef *hdma = huart->hdmarx;
+
+//        /* Determine how many items of data have been received */
+
+//        rxXferCount = huart->RxXferSize - __HAL_DMA_GET_COUNTER(hdma);
+//        aRxBufferPos = rxXferCount;
+
+//        huart->RxXferCount = 0;
+
+//        /* Check if a transmit process is ongoing or not */
+
+//        if(huart->gState == HAL_UART_STATE_BUSY_TX_RX)
+//        {
+//            huart->gState = HAL_UART_STATE_BUSY_TX;
+//        }
+//        else
+//        {
+//            huart->gState = HAL_UART_STATE_READY;
+//        }
+
+////        processTMGWMessage(&huart1, (uint8_t *)aRxBuffer, rxXferCount);
+////        BKPT;
+//        printf("Opala\r\n");
+////        HAL_UART_Receive_DMA(&huart1, (uint8_t *)aRxBuffer, 256);
+//        return;
+//    }
+
+//    return;
+//}
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
@@ -208,6 +257,8 @@ int main(void)
 
   ITM_Init();
 
+  HAL_Delay(100);
+
   printf("Smooker 2020 STM32F103RCT6\r\n");
 
   /* USER CODE END 2 */
@@ -218,7 +269,8 @@ int main(void)
   {
     /* USER CODE END WHILE */
 
-    printf("Smooker 2020 STM32F103RCT6\r\n");
+//    printf("%04x\n", TIM_CNT_CNT);
+    printf("SM\r\n");
     sendmbcmd(0);
 
     /* USER CODE BEGIN 3 */
@@ -362,7 +414,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 2500000;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
