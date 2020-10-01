@@ -33,6 +33,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define COUNTOF(__BUFFER__)   (sizeof(__BUFFER__) / sizeof(*(__BUFFER__)))
+#define BUFFERSIZE 256
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -51,6 +54,23 @@ DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
 
+__IO ITStatus Uart1Ready = RESET;
+
+uint8_t aTxBufferPos = 0;
+uint8_t aTxBuffer[256];
+
+uint8_t aRxBufferPos = 0;
+uint8_t aRxBuffer[BUFFERSIZE];
+
+struct MBCmds {
+   uint8_t  cmdlen;
+   uint8_t  cmd[256];
+};
+
+struct MBCmds mbcmds[10] = {
+    {1, {0x52}},                      //TEST TAMAGAWA
+};
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -66,6 +86,88 @@ static void MX_TIM4_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1)
+    {
+        if(HAL_UART_Receive_DMA(&huart1, (uint8_t *)aRxBuffer, 256) != HAL_OK)
+        {
+            Error_Handler();
+        }
+    }
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1)
+    {
+        /* Set transmission flag: transfer complete */
+        Uart1Ready = SET;
+        HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_RESET);
+    }
+}
+
+void ITM_Init(void)
+{
+    /* STM32 specific configuration to enable the TRACESWO IO pin */
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
+    AFIO->MAPR |= (2 << 24); // Disable JTAG to release TRACESWO
+    DBGMCU->CR |= DBGMCU_CR_TRACE_IOEN; // Enable IO trace pins
+
+    TPI->ACPR = 31;  // Output bits at 72000000/(31+1)=2.25MHz.
+    TPI->SPPR = 2;   // Use Async mode (1 for RZ/Manchester)
+    TPI->FFCR  = 0;   // Disable formatter
+
+    /* Configure instrumentation trace macroblock */
+    ITM->LAR = 0xC5ACCE55;
+    ITM->TCR = 1 << ITM_TCR_TraceBusID_Pos | ITM_TCR_SYNCENA_Msk |
+               ITM_TCR_ITMENA_Msk;
+    ITM->TER = 0xFFFFFFFF; // Enable all stimulus ports
+}
+
+//printf on ITM
+int __write(int file, char *ptr, int len)
+{
+  /* Implement your write code here, this is used by puts and printf for example */
+  int i=0;
+  for(i=0 ; i<len ; i++)
+    ITM_SendChar((*ptr++));
+  return len;
+}
+
+void sendmbcmd(uint8_t cmdno) {
+
+    uint8_t len = mbcmds[cmdno].cmdlen;
+
+    uint8_t cnt;
+    for(cnt=0;cnt<len;cnt++) {
+        aTxBuffer[cnt]=mbcmds[cmdno].cmd[cnt];
+    }   //fixme. to be done with memcpy
+
+//    //to be done with crc unit ?
+//    uint16_t crc = mb_rtu_crc(&aTxBuffer, len);
+//    aTxBuffer[len+1] = (uint8_t)(crc >> 8);
+//    aTxBuffer[len] = (uint8_t)(crc & 0x00ff);
+
+//    aTxBufferPos = len+2;
+
+    //digni DRIVER ENABLE
+    HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);
+//    HAL_Delay(5);
+
+    HAL_StatusTypeDef stat = HAL_ERROR;
+
+    stat = HAL_UART_Transmit_DMA(&huart1, (uint8_t*)&aTxBuffer, len);         // W/O
+    if(stat != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    /*## Wait for the end of the transfer ###################################*/
+    while (Uart1Ready != SET)
+    {
+    }
+}
 
 /* USER CODE END 0 */
 
@@ -101,8 +203,12 @@ int main(void)
   MX_USART1_UART_Init();
   MX_CRC_Init();
   MX_TIM4_Init();
-  MX_USB_DEVICE_Init();
+//  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+
+  ITM_Init();
+
+  printf("Smooker 2020 STM32F103RCT6\r\n");
 
   /* USER CODE END 2 */
 
@@ -111,6 +217,9 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+
+    printf("Smooker 2020 STM32F103RCT6\r\n");
+    sendmbcmd(0);
 
     /* USER CODE BEGIN 3 */
   }
@@ -266,6 +375,11 @@ static void MX_USART1_UART_Init(void)
   }
   /* USER CODE BEGIN USART1_Init 2 */
 
+  //Activate UART DMA for receive
+  if(HAL_UART_Receive_DMA(&huart1, (uint8_t *)&aRxBuffer, 256) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE END USART1_Init 2 */
 
 }
@@ -296,12 +410,23 @@ static void MX_DMA_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : DE_Pin */
+  GPIO_InitStruct.Pin = DE_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(DE_GPIO_Port, &GPIO_InitStruct);
 
 }
 
