@@ -178,8 +178,7 @@ void ITM_Init(void)
 int __write(int file, char *ptr, int len)
 {
   /* Implement your write code here, this is used by puts and printf for example */
-  int i=0;
-  for(i=0 ; i<len ; i++)
+  for(int i=0 ; i<len ; i++)
     ITM_SendChar((*ptr++));
   return len;
 }
@@ -201,12 +200,12 @@ void sendmbcmd(uint8_t cmdno) {
 //    aTxBufferPos = len+2;
 
     //digni DRIVER ENABLE
-    HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);
 //    HAL_Delay(5);
 
     HAL_StatusTypeDef stat = HAL_ERROR;
 
     stat = HAL_UART_Transmit_DMA(&huart1, (uint8_t*)&aTxBuffer, len);         // W/O
+    HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);
     if(stat != HAL_OK)
     {
       Error_Handler();
@@ -269,9 +268,10 @@ int main(void)
   {
     /* USER CODE END WHILE */
 
-//    printf("%04x\n", TIM_CNT_CNT);
-    printf("SM\r\n");
+    printf("%04x\n", TIM_CNT_CNT);
+//    printf("SM\r\n");
     sendmbcmd(0);
+//    HAL_Delay(100);
 
     /* USER CODE BEGIN 3 */
   }
@@ -420,7 +420,7 @@ static void MX_USART1_UART_Init(void)
   huart1.Init.Parity = UART_PARITY_NONE;
   huart1.Init.Mode = UART_MODE_TX_RX;
   huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+//  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
   if (HAL_UART_Init(&huart1) != HAL_OK)
   {
     Error_Handler();
