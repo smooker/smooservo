@@ -19,7 +19,6 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -49,8 +48,8 @@ CRC_HandleTypeDef hcrc;
 TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart1;
-DMA_HandleTypeDef hdma_usart1_tx;
 DMA_HandleTypeDef hdma_usart1_rx;
+DMA_HandleTypeDef hdma_usart1_tx;
 
 /* USER CODE BEGIN PV */
 
@@ -89,6 +88,9 @@ static void MX_TIM4_Init(void);
 
 void processTMGWMessage(UART_HandleTypeDef* huart, uint8_t* ptr, int len)
 {
+    UNUSED(len);
+    UNUSED(huart);
+    UNUSED(ptr);
     printf("asdf\r\n");
 }
 
@@ -127,7 +129,13 @@ void HAL_UART_RxIdleCallback(UART_HandleTypeDef* huart)
 
 //        processTMGWMessage(&huart1, (uint8_t *)aRxBuffer, rxXferCount);
 //        BKPT;
-        printf("Opala\r\n");
+
+        printf("RX1:%02x\r\n", aRxBuffer[0]);
+
+//        if (aRxBuffer[0] == 0x52) {
+//            sendmbcmd(3);
+//        }
+
         HAL_UART_Receive_DMA(&huart1, (uint8_t *)aRxBuffer, 256);
         return;
     }
@@ -139,7 +147,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
     {
-        printf("Opala\r\n");
+        printf("RX2:%02x\r\n", aRxBuffer[0]);
         if(HAL_UART_Receive_DMA(&huart1, (uint8_t *)aRxBuffer, 256) != HAL_OK)
         {
             Error_Handler();
@@ -178,6 +186,7 @@ void ITM_Init(void)
 //printf on ITM
 int __write(int file, char *ptr, int len)
 {
+    UNUSED(file);
   /* Implement your write code here, this is used by puts and printf for example */
   for(int i=0 ; i<len ; i++)
     ITM_SendChar((*ptr++));
@@ -242,10 +251,11 @@ int main(void)
   /* USER CODE END Init */
 
   /* Configure the system clock */
-
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
+
+  ITM_Init();
 
   /* USER CODE END SysInit */
 
@@ -255,12 +265,9 @@ int main(void)
   MX_USART1_UART_Init();
   MX_CRC_Init();
   MX_TIM4_Init();
-//  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
-  ITM_Init();
-
-  HAL_Delay(100);
+//  HAL_Delay(200);
 
   printf("Smooker 2020 STM32F103RCT6\r\n");
 
@@ -268,19 +275,10 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  unsigned int cnt = 0;
 
   while (1)
   {
     /* USER CODE END WHILE */
-
-      if ((cnt % 13078) == 1) {
-        printf("%06x\n", cnt);
-      }
-      cnt++;
-//    printf("SM\r\n");
-//    sendmbcmd(0);
-//    HAL_Delay(100);
 
     /* USER CODE BEGIN 3 */
   }
@@ -295,7 +293,6 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -321,12 +318,6 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USB;
-  PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_PLL_DIV1_5;
-  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
@@ -424,12 +415,12 @@ static void MX_USART1_UART_Init(void)
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
   huart1.Init.BaudRate = 2500000;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.WordLength = UART_WORDLENGTH_9B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
   huart1.Init.Mode = UART_MODE_TX_RX;
   huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-//  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
   if (HAL_UART_Init(&huart1) != HAL_OK)
   {
     Error_Handler();
@@ -480,8 +471,8 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_RESET);
@@ -489,7 +480,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : DE_Pin */
   GPIO_InitStruct.Pin = DE_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(DE_GPIO_Port, &GPIO_InitStruct);
 
