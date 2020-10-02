@@ -92,53 +92,54 @@ void processTMGWMessage(UART_HandleTypeDef* huart, uint8_t* ptr, int len)
     printf("asdf\r\n");
 }
 
-//void HAL_UART_RxIdleCallback(UART_HandleTypeDef* huart)
-//{
-//    uint16_t rxXferCount = 0;
+void HAL_UART_RxIdleCallback(UART_HandleTypeDef* huart)
+{
+    uint16_t rxXferCount = 0;
 
-//    //
-//    if( (huart->hdmarx != NULL) && (huart->Instance == USART1) )
-//    {
-//        __HAL_UART_CLEAR_IDLEFLAG(huart);
-//        __HAL_UART_ENABLE_IT(huart, UART_IT_TXE);
+    //
+    if( (huart->hdmarx != NULL) && (huart->Instance == USART1) )
+    {
+        __HAL_UART_CLEAR_IDLEFLAG(huart);
+        __HAL_UART_ENABLE_IT(huart, UART_IT_TXE);
 
-////        HAL_UART_DMAStop(huart);
-//        HAL_UART_Abort(huart);
+//        HAL_UART_DMAStop(huart);
+        HAL_UART_Abort(huart);
 
-//        DMA_HandleTypeDef *hdma = huart->hdmarx;
+        DMA_HandleTypeDef *hdma = huart->hdmarx;
 
-//        /* Determine how many items of data have been received */
+        /* Determine how many items of data have been received */
 
-//        rxXferCount = huart->RxXferSize - __HAL_DMA_GET_COUNTER(hdma);
-//        aRxBufferPos = rxXferCount;
+        rxXferCount = huart->RxXferSize - __HAL_DMA_GET_COUNTER(hdma);
+        aRxBufferPos = rxXferCount;
 
-//        huart->RxXferCount = 0;
+        huart->RxXferCount = 0;
 
-//        /* Check if a transmit process is ongoing or not */
+        /* Check if a transmit process is ongoing or not */
 
-//        if(huart->gState == HAL_UART_STATE_BUSY_TX_RX)
-//        {
-//            huart->gState = HAL_UART_STATE_BUSY_TX;
-//        }
-//        else
-//        {
-//            huart->gState = HAL_UART_STATE_READY;
-//        }
+        if(huart->gState == HAL_UART_STATE_BUSY_TX_RX)
+        {
+            huart->gState = HAL_UART_STATE_BUSY_TX;
+        }
+        else
+        {
+            huart->gState = HAL_UART_STATE_READY;
+        }
 
-////        processTMGWMessage(&huart1, (uint8_t *)aRxBuffer, rxXferCount);
-////        BKPT;
-//        printf("Opala\r\n");
-////        HAL_UART_Receive_DMA(&huart1, (uint8_t *)aRxBuffer, 256);
-//        return;
-//    }
+//        processTMGWMessage(&huart1, (uint8_t *)aRxBuffer, rxXferCount);
+//        BKPT;
+        printf("Opala\r\n");
+        HAL_UART_Receive_DMA(&huart1, (uint8_t *)aRxBuffer, 256);
+        return;
+    }
 
-//    return;
-//}
+    return;
+}
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
     {
+        printf("Opala\r\n");
         if(HAL_UART_Receive_DMA(&huart1, (uint8_t *)aRxBuffer, 256) != HAL_OK)
         {
             Error_Handler();
@@ -203,9 +204,9 @@ void sendmbcmd(uint8_t cmdno) {
 //    HAL_Delay(5);
 
     HAL_StatusTypeDef stat = HAL_ERROR;
-
-    stat = HAL_UART_Transmit_DMA(&huart1, (uint8_t*)&aTxBuffer, len);         // W/O
     HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);
+    stat = HAL_UART_Transmit_DMA(&huart1, (uint8_t*)&aTxBuffer, len);         // W/O
+
     if(stat != HAL_OK)
     {
       Error_Handler();
@@ -227,6 +228,8 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
 
+    HAL_DBGMCU_EnableDBGStopMode();
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -239,6 +242,7 @@ int main(void)
   /* USER CODE END Init */
 
   /* Configure the system clock */
+
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
@@ -264,13 +268,18 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  unsigned int cnt = 0;
+
   while (1)
   {
     /* USER CODE END WHILE */
 
-    printf("%04x\n", TIM_CNT_CNT);
+      if ((cnt % 13078) == 1) {
+        printf("%06x\n", cnt);
+      }
+      cnt++;
 //    printf("SM\r\n");
-    sendmbcmd(0);
+//    sendmbcmd(0);
 //    HAL_Delay(100);
 
     /* USER CODE BEGIN 3 */
@@ -426,6 +435,10 @@ static void MX_USART1_UART_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN USART1_Init 2 */
+
+  //Activate RX Idle callback.
+  __HAL_UART_CLEAR_IDLEFLAG(&huart1);
+  __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
 
   //Activate UART DMA for receive
   if(HAL_UART_Receive_DMA(&huart1, (uint8_t *)&aRxBuffer, 256) != HAL_OK)
