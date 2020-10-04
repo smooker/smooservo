@@ -61,6 +61,8 @@ uint8_t aTxBuffer[256];
 uint8_t aRxBufferPos = 0;
 uint8_t aRxBuffer[BUFFERSIZE];
 
+uint8_t needResponse = 0;
+
 struct MBCmds {
    uint8_t  cmdlen;
    uint8_t  cmd[256];
@@ -131,6 +133,7 @@ void HAL_UART_RxIdleCallback(UART_HandleTypeDef* huart)
 //        BKPT;
 
         printf("RX1:%02x\r\n", aRxBuffer[0]);
+        needResponse = 1;
 
 //        if (aRxBuffer[0] == 0x52) {
 //            sendmbcmd(3);
@@ -152,17 +155,81 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         {
             Error_Handler();
         }
+        needResponse = 1;
     }
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
+    BKPT;
     if (huart->Instance == USART1)
     {
         /* Set transmission flag: transfer complete */
         Uart1Ready = SET;
         HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_RESET);
     }
+}
+
+
+void configure_tracing()
+{
+    /* STM32 specific configuration to enable the TRACESWO IO pin */
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
+    AFIO->MAPR |= (2 << 24); // Disable JTAG to release TRACESWO
+    DBGMCU->CR |= DBGMCU_CR_TRACE_IOEN; // Enable IO trace pins
+
+    if (!(DBGMCU->CR & DBGMCU_CR_TRACE_IOEN))
+    {
+        // Some (all?) STM32s don't allow writes to DBGMCU register until
+        // C_DEBUGEN in CoreDebug->DHCSR is set. This cannot be set by the
+        // CPU itself, so in practice you need to connect to the CPU with
+        // a debugger once before resetting it.
+        return;
+    }
+
+    /* Configure Trace Port Interface Unit */
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk; // Enable access to registers
+    TPI->ACPR = 0; // Trace clock = HCLK/(x+1) = 8MHz = UART 's baudrate
+                   // The HCLK of F105 is 8MHz so x is 0, and the F103 is 72MHz so x is 8
+    TPI->SPPR = 2; // Pin protocol = NRZ/USART
+    TPI->FFCR = 0x102; // TPIU packet framing enabled when bit 2 is set.
+                       // You can use 0x100 if you only need DWT/ITM and not ETM.
+
+    /* Configure PC sampling and exception trace  */
+    DWT->CTRL = (1 << DWT_CTRL_CYCTAP_Pos) // Prescaler for PC sampling
+                                           // 0 = x32, 1 = x512
+              | (0 << DWT_CTRL_POSTPRESET_Pos) // Postscaler for PC sampling
+                                                // Divider = value + 1
+              | (1 << DWT_CTRL_PCSAMPLENA_Pos) // Enable PC sampling
+              | (2 << DWT_CTRL_SYNCTAP_Pos)    // Sync packet interval
+                                               // 0 = Off, 1 = Every 2^23 cycles,
+                                               // 2 = Every 2^25, 3 = Every 2^27
+              | (1 << DWT_CTRL_EXCTRCENA_Pos)  // Enable exception trace
+              | (1 << DWT_CTRL_CYCCNTENA_Pos); // Enable cycle counter
+
+    /* Configure instrumentation trace macroblock */
+    ITM->LAR = 0xC5ACCE55;
+    ITM->TCR = (1 << ITM_TCR_TraceBusID_Pos) // Trace bus ID for TPIU
+             | (1 << ITM_TCR_DWTENA_Pos) // Enable events from DWT
+             | (1 << ITM_TCR_SYNCENA_Pos) // Enable sync packets
+             | (1 << ITM_TCR_ITMENA_Pos); // Main enable for ITM
+    ITM->TER = 0xFFFFFFFF; // Enable all stimulus ports
+
+//    /* Configure embedded trace macroblock */
+//    ETM->LAR = 0xC5ACCE55;
+//    ETM_SetupMode();
+//    ETM->CR = ETM_CR_ETMEN // Enable ETM output port
+//            | ETM_CR_STALL_PROCESSOR // Stall processor when fifo is full
+//            | ETM_CR_BRANCH_OUTPUT; // Report all branches
+//         // | ETM_CR_PORTIZE_8BIT;  // Add this code in F103 to set port_size 21, 6, 5, 4 as 0, 0, 0, 1 for 8Bit.
+//    ETM->TRACEIDR = 2; // Trace bus ID for TPIU
+//    ETM->TECR1 = ETM_TECR1_EXCLUDE; // Trace always enabled
+//    ETM->FFRR = ETM_FFRR_EXCLUDE; // Stalling always enabled
+//    ETM->FFLR = 24; // Stall when less than N bytes free in FIFO (range 1..24)
+//                    // Larger values mean less latency in trace, but more stalls.
+//    // ETM->TRIGGER = 0x0000406F; // Add this code in F103 to define the trigger event
+//    // ETM->TEEVR = 0x0000006F;   // Add this code in F103 to  define an event to start/stop
+//    // Note: we do not enable ETM trace yet, only for specific parts of code.
 }
 
 void ITM_Init(void)
@@ -188,8 +255,10 @@ int __write(int file, char *ptr, int len)
 {
     UNUSED(file);
   /* Implement your write code here, this is used by puts and printf for example */
-  for(int i=0 ; i<len ; i++)
+  for(int i=0 ; i<len ; i++) {
+//      BKPT;
     ITM_SendChar((*ptr++));
+  }
   return len;
 }
 
@@ -202,23 +271,18 @@ void sendmbcmd(uint8_t cmdno) {
         aTxBuffer[cnt]=mbcmds[cmdno].cmd[cnt];
     }   //fixme. to be done with memcpy
 
-//    //to be done with crc unit ?
-//    uint16_t crc = mb_rtu_crc(&aTxBuffer, len);
-//    aTxBuffer[len+1] = (uint8_t)(crc >> 8);
-//    aTxBuffer[len] = (uint8_t)(crc & 0x00ff);
-
-//    aTxBufferPos = len+2;
-
-    //digni DRIVER ENABLE
-//    HAL_Delay(5);
-
     HAL_StatusTypeDef stat = HAL_ERROR;
     HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);
-    stat = HAL_UART_Transmit_DMA(&huart1, (uint8_t*)&aTxBuffer, len);         // W/O
 
-    if(stat != HAL_OK)
-    {
-      Error_Handler();
+    if ((huart1.gState == HAL_UART_STATE_READY) || (huart1.gState == HAL_UART_STATE_BUSY_RX)) {
+
+        stat = HAL_UART_Transmit_DMA(&huart1, (uint8_t*)&aTxBuffer, len);         // W/O
+
+        if(stat != HAL_OK)
+        {
+          Error_Handler();
+        }
+
     }
 
     /*## Wait for the end of the transfer ###################################*/
@@ -237,7 +301,8 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
 
-    HAL_DBGMCU_EnableDBGStopMode();
+//    HAL_DBGMCU_EnableDBGStopMode();
+//    HAL_DBGMCU_DisableDBGStopMode();
 
   /* USER CODE END 1 */
 
@@ -256,6 +321,7 @@ int main(void)
   /* USER CODE BEGIN SysInit */
 
   ITM_Init();
+//  configure_tracing();
 
   /* USER CODE END SysInit */
 
@@ -269,15 +335,21 @@ int main(void)
 
 //  HAL_Delay(200);
 
-  printf("Smooker 2020 STM32F103RCT6\r\n");
+  printf("BOOT\r\n");
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
+  int cnt = 0;
+
   while (1)
   {
+      printf("%04d\r\n", cnt++);
+//      if ( (needResponse == 1) && aRxBuffer[0] == 0x52 ) {
+          sendmbcmd(0);
+//      }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -414,7 +486,8 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 2500000;
+//  huart1.Init.BaudRate = 2500000;
+  huart1.Init.BaudRate = 115200;
   huart1.Init.WordLength = UART_WORDLENGTH_9B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -477,12 +550,22 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : DE_Pin */
   GPIO_InitStruct.Pin = DE_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(DE_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LED0_Pin */
+  GPIO_InitStruct.Pin = LED0_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LED0_GPIO_Port, &GPIO_InitStruct);
 
 }
 
@@ -498,6 +581,15 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+
+    BKPT;
+
+//  printf("HAL ERROR!!!");
+
+//  while (1) {
+//    HAL_GPIO_TogglePin(LED0_GPIO_Port, LED0_Pin);
+//    HAL_Delay(100);
+//  }
 
   /* USER CODE END Error_Handler_Debug */
 }
