@@ -2049,16 +2049,16 @@ void HAL_UART_IRQHandler(UART_HandleTypeDef *huart)
   uint8_t tmp_flag = 0;
   uint8_t tmp_it_source = 0;
 
-  tmp_flag = __HAL_UART_GET_FLAG(huart, UART_FLAG_IDLE);
-  tmp_it_source = __HAL_UART_GET_IT_SOURCE(huart, UART_IT_IDLE);
+//  tmp_flag = __HAL_UART_GET_FLAG(huart, UART_FLAG_IDLE);
+//  tmp_it_source = __HAL_UART_GET_IT_SOURCE(huart, UART_IT_IDLE);
 
-  /* UART RX Idle interrupt -------------------------------------------- smooker added !??! */
+//  /* UART RX Idle interrupt -------------------------------------------- smooker added !??! */
 
-  if((tmp_flag != RESET) && (tmp_it_source != RESET))
-  {
-    __HAL_UART_CLEAR_IDLEFLAG(huart);
-    HAL_UART_RxIdleCallback(huart);
-  }
+//  if((tmp_flag != RESET) && (tmp_it_source != RESET))
+//  {
+//    __HAL_UART_CLEAR_IDLEFLAG(huart);
+//    HAL_UART_RxIdleCallback(huart);
+//  }
 
   /* If no error occurs */
   errorflags = (isrflags & (uint32_t)(USART_SR_PE | USART_SR_FE | USART_SR_ORE | USART_SR_NE));

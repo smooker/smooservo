@@ -89,11 +89,15 @@ struct tmgw_struc {
 struct tmgw_struc2 {
     struct tmgw_struc rx;
     struct tmgw_struc tx;
+    struct tmgw_struc test;
 };
 
 struct tmgw_struc2 tmgw;
 
 int txcnt2 = 0;
+
+__IO uint32_t uwCRCValue = 0;
+
 
 /* USER CODE END PV */
 
@@ -121,16 +125,20 @@ void processTMGWMessage(UART_HandleTypeDef* huart, uint8_t* ptr, int len)
 
 void HAL_UART_RxIdleCallback(UART_HandleTypeDef* huart)
 {
+    BKPT;
     uint16_t rxXferCount = 0;
 
     //
     if( (huart->hdmarx != NULL) && (huart->Instance == USART1) )
     {
+
+        HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);          //debug only
+
         __HAL_UART_CLEAR_IDLEFLAG(huart);
         __HAL_UART_ENABLE_IT(huart, UART_IT_TXE);
 
 //        HAL_UART_DMAStop(huart);
-        HAL_UART_Abort(huart);
+//        HAL_UART_Abort(huart);
 
         DMA_HandleTypeDef *hdma = huart->hdmarx;
 
@@ -157,6 +165,8 @@ void HAL_UART_RxIdleCallback(UART_HandleTypeDef* huart)
 
         tmgw.rx.received = 1;
 
+        HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_RESET);          //debug only
+
         return;
     }
 
@@ -166,18 +176,17 @@ void HAL_UART_RxIdleCallback(UART_HandleTypeDef* huart)
 void startReceive()
 {
     memset(&tmgw.rx, 0, sizeof(tmgw.rx));
-    HAL_UART_Receive_DMA(&huart1, (uint8_t *)&tmgw.rx, sizeof(tmgw.rx));
+    HAL_UART_Receive_DMA(&huart1, (uint8_t *)&tmgw.rx, 1);
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
     {
-        printf("RX2:%02x\r\n", tmgw.rx.cf);
-        if(HAL_UART_Receive_DMA(&huart1, (uint8_t *)&tmgw.rx, sizeof (tmgw.rx)) != HAL_OK)
-        {
-            Error_Handler();
-        }
+        HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);          //debug only
+//        printf("R2%02x\n", tmgw.rx.cf);
+        HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_RESET);          //debug only
+        startReceive();
         tmgw.rx.received = 1;
     }
 }
@@ -222,7 +231,7 @@ void configure_tracing()
     DWT->CTRL = (1 << DWT_CTRL_CYCTAP_Pos) // Prescaler for PC sampling
                                            // 0 = x32, 1 = x512
               | (0 << DWT_CTRL_POSTPRESET_Pos) // Postscaler for PC sampling
-                                                // Divider = value + 1
+                                               // Divider = value + 1
               | (1 << DWT_CTRL_PCSAMPLENA_Pos) // Enable PC sampling
               | (2 << DWT_CTRL_SYNCTAP_Pos)    // Sync packet interval
                                                // 0 = Off, 1 = Every 2^23 cycles,
@@ -233,26 +242,10 @@ void configure_tracing()
     /* Configure instrumentation trace macroblock */
     ITM->LAR = 0xC5ACCE55;
     ITM->TCR = (1 << ITM_TCR_TraceBusID_Pos) // Trace bus ID for TPIU
-             | (1 << ITM_TCR_DWTENA_Pos) // Enable events from DWT
-             | (1 << ITM_TCR_SYNCENA_Pos) // Enable sync packets
-             | (1 << ITM_TCR_ITMENA_Pos); // Main enable for ITM
+             | (1 << ITM_TCR_DWTENA_Pos)     // Enable events from DWT
+             | (1 << ITM_TCR_SYNCENA_Pos)    // Enable sync packets
+             | (1 << ITM_TCR_ITMENA_Pos);    // Main enable for ITM
     ITM->TER = 0xFFFFFFFF; // Enable all stimulus ports
-
-//    /* Configure embedded trace macroblock */
-//    ETM->LAR = 0xC5ACCE55;
-//    ETM_SetupMode();
-//    ETM->CR = ETM_CR_ETMEN // Enable ETM output port
-//            | ETM_CR_STALL_PROCESSOR // Stall processor when fifo is full
-//            | ETM_CR_BRANCH_OUTPUT; // Report all branches
-//         // | ETM_CR_PORTIZE_8BIT;  // Add this code in F103 to set port_size 21, 6, 5, 4 as 0, 0, 0, 1 for 8Bit.
-//    ETM->TRACEIDR = 2; // Trace bus ID for TPIU
-//    ETM->TECR1 = ETM_TECR1_EXCLUDE; // Trace always enabled
-//    ETM->FFRR = ETM_FFRR_EXCLUDE; // Stalling always enabled
-//    ETM->FFLR = 24; // Stall when less than N bytes free in FIFO (range 1..24)
-//                    // Larger values mean less latency in trace, but more stalls.
-//    // ETM->TRIGGER = 0x0000406F; // Add this code in F103 to define the trigger event
-//    // ETM->TEEVR = 0x0000006F;   // Add this code in F103 to  define an event to start/stop
-//    // Note: we do not enable ETM trace yet, only for specific parts of code.
 }
 
 void ITM_Init(void)
@@ -273,52 +266,30 @@ void ITM_Init(void)
     ITM->TER = 0xFFFFFFFF; // Enable all stimulus ports
 }
 
-unsigned crc8x_simple(unsigned crc, void const *mem, size_t len) {
-    unsigned char const *data = mem;
-    if (data == NULL)
-        return 0xff;
-    while (len--) {
-        crc ^= *data++;
-        for (unsigned k = 0; k < 8; k++)
-            crc = crc & 0x80 ? (crc << 1) ^ 0x31 : crc << 1;
+//
+static uint8_t crcCalc(uint8_t* Data, uint8_t Size)
+{
+  uint8_t j;
+  uint8_t Carry;
+  uint8_t Crc;
+
+  Crc = 0;
+
+  while (Size-- > 0)
+  {
+    Crc ^= *Data++;
+    for (j = 8; j != 0; j--)
+    {
+      Carry = Crc & 0x80;
+      Crc <<= 1;
+      if (Carry != 0)
+      {
+        Crc ^= 0x01;  /* Polynome X^8 + 1  */
+      }
     }
-    crc &= 0xff;
-    return crc;
+  }
+  return (Crc & 0x00FF);
 }
-
-static unsigned char const crc8x_table[] = {
-    0x00, 0x31, 0x62, 0x53, 0xc4, 0xf5, 0xa6, 0x97, 0xb9, 0x88, 0xdb, 0xea, 0x7d,
-    0x4c, 0x1f, 0x2e, 0x43, 0x72, 0x21, 0x10, 0x87, 0xb6, 0xe5, 0xd4, 0xfa, 0xcb,
-    0x98, 0xa9, 0x3e, 0x0f, 0x5c, 0x6d, 0x86, 0xb7, 0xe4, 0xd5, 0x42, 0x73, 0x20,
-    0x11, 0x3f, 0x0e, 0x5d, 0x6c, 0xfb, 0xca, 0x99, 0xa8, 0xc5, 0xf4, 0xa7, 0x96,
-    0x01, 0x30, 0x63, 0x52, 0x7c, 0x4d, 0x1e, 0x2f, 0xb8, 0x89, 0xda, 0xeb, 0x3d,
-    0x0c, 0x5f, 0x6e, 0xf9, 0xc8, 0x9b, 0xaa, 0x84, 0xb5, 0xe6, 0xd7, 0x40, 0x71,
-    0x22, 0x13, 0x7e, 0x4f, 0x1c, 0x2d, 0xba, 0x8b, 0xd8, 0xe9, 0xc7, 0xf6, 0xa5,
-    0x94, 0x03, 0x32, 0x61, 0x50, 0xbb, 0x8a, 0xd9, 0xe8, 0x7f, 0x4e, 0x1d, 0x2c,
-    0x02, 0x33, 0x60, 0x51, 0xc6, 0xf7, 0xa4, 0x95, 0xf8, 0xc9, 0x9a, 0xab, 0x3c,
-    0x0d, 0x5e, 0x6f, 0x41, 0x70, 0x23, 0x12, 0x85, 0xb4, 0xe7, 0xd6, 0x7a, 0x4b,
-    0x18, 0x29, 0xbe, 0x8f, 0xdc, 0xed, 0xc3, 0xf2, 0xa1, 0x90, 0x07, 0x36, 0x65,
-    0x54, 0x39, 0x08, 0x5b, 0x6a, 0xfd, 0xcc, 0x9f, 0xae, 0x80, 0xb1, 0xe2, 0xd3,
-    0x44, 0x75, 0x26, 0x17, 0xfc, 0xcd, 0x9e, 0xaf, 0x38, 0x09, 0x5a, 0x6b, 0x45,
-    0x74, 0x27, 0x16, 0x81, 0xb0, 0xe3, 0xd2, 0xbf, 0x8e, 0xdd, 0xec, 0x7b, 0x4a,
-    0x19, 0x28, 0x06, 0x37, 0x64, 0x55, 0xc2, 0xf3, 0xa0, 0x91, 0x47, 0x76, 0x25,
-    0x14, 0x83, 0xb2, 0xe1, 0xd0, 0xfe, 0xcf, 0x9c, 0xad, 0x3a, 0x0b, 0x58, 0x69,
-    0x04, 0x35, 0x66, 0x57, 0xc0, 0xf1, 0xa2, 0x93, 0xbd, 0x8c, 0xdf, 0xee, 0x79,
-    0x48, 0x1b, 0x2a, 0xc1, 0xf0, 0xa3, 0x92, 0x05, 0x34, 0x67, 0x56, 0x78, 0x49,
-    0x1a, 0x2b, 0xbc, 0x8d, 0xde, 0xef, 0x82, 0xb3, 0xe0, 0xd1, 0x46, 0x77, 0x24,
-    0x15, 0x3b, 0x0a, 0x59, 0x68, 0xff, 0xce, 0x9d, 0xac};
-
-unsigned crc8x_fast(unsigned crc, void const *mem, size_t len) {
-    unsigned char const *data = mem;
-    if (data == NULL)
-        return 0xff;
-    crc &= 0xff;
-    while (len--)
-        crc = crc8x_table[crc ^ *data++];
-    return crc;
-}
-
-
 
 //printf on ITM
 int __write(int file, char *ptr, int len)
@@ -332,21 +303,61 @@ int __write(int file, char *ptr, int len)
   return len;
 }
 
+/* Function to reverse bits of num */
+uint8_t reverseBits(uint8_t num)
+{
+    unsigned int  NO_OF_BITS = sizeof(num) * 8;
+    unsigned int reverse_num = 0, i, temp;
+
+    for (i = 0; i < NO_OF_BITS; i++)
+    {
+        temp = (num & (1 << i));
+        if(temp)
+            reverse_num |= (1 << ((NO_OF_BITS - 1) - i));
+    }
+
+    return reverse_num;
+}
+
 void sendmbcmd(uint8_t cmdno)
 {
-    uint8_t len = mbcmds[cmdno].cmdlen;
+    //check for readiness for transmission
+    if ( (huart1.gState == HAL_UART_STATE_READY) )
+//    if ((huart1.gState == HAL_UART_STATE_READY) || (huart1.gState == HAL_UART_STATE_BUSY_RX)) //glupavo. na rs485 sme i se machkame sami po vreme na priemane
+    {
+        tmgw.rx.received = 0;
 
-    tmgw.tx.cf = 0x52;
-    tmgw.tx.sf = 0x00;
-    tmgw.tx.d0 = 0xff;
-    tmgw.tx.d1 = 0x55;
-    tmgw.tx.d2 = 0xaa;
-    tmgw.tx.len = 5;
+        tmgw.tx.cf = 0b01010010;
+        tmgw.tx.sf = 0x0c ;
+        tmgw.tx.d0 = 0x17;
 
-    HAL_StatusTypeDef stat = HAL_ERROR;
-    HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);
+    //    tmgw.tx.d1 = 0x40;
+    //    tmgw.tx.d2 = 0x88;
 
-    if ((huart1.gState == HAL_UART_STATE_READY) || (huart1.gState == HAL_UART_STATE_BUSY_RX)) {
+        tmgw.tx.len = 4;            //+1 for crc
+
+        tmgw.test.len = tmgw.tx.len;
+    //    tmgw.test.cf = reverseBits(tmgw.tx.cf);
+    //    tmgw.test.sf = reverseBits(tmgw.tx.sf);
+    //    tmgw.test.d0 = reverseBits(tmgw.tx.d0);
+    //    tmgw.test.d1 = reverseBits(tmgw.tx.d1);
+    //    tmgw.test.d2 = reverseBits(tmgw.tx.d2);
+
+        tmgw.test.cf = (tmgw.tx.cf);
+        tmgw.test.sf = (tmgw.tx.sf);
+        tmgw.test.d0 = (tmgw.tx.d0);
+        tmgw.test.d1 = (tmgw.tx.d1);
+        tmgw.test.d2 = (tmgw.tx.d2);
+
+
+    //    //FIXED CRC CALCS.... FIXME
+    //    uwCRCValue = HAL_CRC_Accumulate(&hcrc, (uint32_t *)&tmgw.tx, tmgw.tx.len);
+    //    tmgw.tx.d3 = crc8x_fast(0xff, &tmgw.test, tmgw.test.len-1);
+    //    tmgw.tx.d3  = reverseBits(0x1d);
+        tmgw.tx.d1 = crcCalc(&tmgw.test.cf, tmgw.test.len-1);
+
+        HAL_StatusTypeDef stat = HAL_ERROR;
+        HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);
 
         stat = HAL_UART_Transmit_DMA(&huart1, (uint8_t*)&tmgw.tx, tmgw.tx.len);         // W/O
 
@@ -355,11 +366,11 @@ void sendmbcmd(uint8_t cmdno)
           Error_Handler();
         }
 
-    }
-
-    /*## Wait for the end of the transfer ################################### zashtooo ?*/
-    while (Uart1Ready != SET)
-    {
+        /*## Wait for the end of the transfer ################################### zashtooo ?*/
+        printf("CRC1:0x%04x", tmgw.tx.d1);
+        while (Uart1Ready != SET)
+        {
+        }
     }
 }
 
@@ -420,17 +431,21 @@ int main(void)
   while (1)
   {
       //tuka ako niamame zabaviane se uebava... da vidim kyde tochno
-      if ( (cnt % 13067) == 1) {
+      if ( (cnt % 130067) == 1) {
           printf("%04d\n", cnt);
       }
       cnt++;
 //      printf("DE:%04x\n", tmgw.rx.received);
 //      printf("DF:%04x\n", tmgw.rx.cf);
 //      BKPT;
-      if ( (tmgw.rx.received == 1) && (tmgw.rx.cf == 0x52) ) {
-          sendmbcmd(0);
-          printf("TX:%04d %04d\r\n", txcnt++, txcnt2);
-      }
+//      if ( (tmgw.rx.received == 1) && (tmgw.rx.cf == 0x52) ) {
+//          sendmbcmd(0);
+////          printf("TX:%04d %04d\r\n", txcnt++, txcnt2);
+//      }
+      //poluchavame received na nulichki
+//      if ( (tmgw.rx.received == 1) && (tmgw.rx.cf != 0x52) ) {
+//          printf("RX:%02x\n", tmgw.rx.cf);
+//      }
       startReceive();
     /* USER CODE END WHILE */
 
@@ -582,9 +597,9 @@ static void MX_USART1_UART_Init(void)
   }
   /* USER CODE BEGIN USART1_Init 2 */
 
-  //Activate RX Idle callback.
-  __HAL_UART_CLEAR_IDLEFLAG(&huart1);
-  __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
+//  //Activate RX Idle callback.
+//  __HAL_UART_CLEAR_IDLEFLAG(&huart1);
+//  __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
 
   //Activate UART DMA for receive
   startReceive();
